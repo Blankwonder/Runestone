@@ -1,5 +1,26 @@
 import UIKit
 
+class Debouncer {
+    private var workItem: DispatchWorkItem?
+    private let queue: DispatchQueue
+    private let delay: TimeInterval
+
+    init(delay: TimeInterval, queue: DispatchQueue = .main) {
+        self.delay = delay
+        self.queue = queue
+    }
+
+    func call(_ action: @escaping () -> Void) {
+        workItem?.cancel()
+
+        workItem = DispatchWorkItem(block: action)
+
+        if let workItem = workItem {
+            queue.asyncAfter(deadline: .now() + delay, execute: workItem)
+        }
+    }
+}
+
 final class UITextSearchingHelper: NSObject {
     weak var textView: TextView?
     var isFindInteractionEnabled = false {
@@ -48,6 +69,10 @@ final class UITextSearchingHelper: NSObject {
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
     }
+    
+    
+    private var _highlightedRanges: [HighlightedRange] = []
+    let debouncer = Debouncer(delay: 0.1)
 }
 
 @available(iOS 16, *)
@@ -91,14 +116,24 @@ extension UITextSearchingHelper: UITextSearching {
         guard let foundTextRange = foundTextRange as? IndexedRange else {
             return
         }
-        _textView.highlightedRanges.removeAll { $0.range == foundTextRange.range }
+        _highlightedRanges.removeAll { $0.range == foundTextRange.range }
         if let highlightedRange = _textView.theme.highlightedRange(forFoundTextRange: foundTextRange.range, ofStyle: style) {
-            _textView.highlightedRanges.append(highlightedRange)
+            _highlightedRanges.append(highlightedRange)
+        }
+        
+        self.applyHighlightedRanges()
+    }
+    
+    func applyHighlightedRanges() {
+        debouncer.call { [weak self] in
+            guard let self = self else { return }
+            self._textView.highlightedRanges = self._highlightedRanges
         }
     }
-
+    
     func clearAllDecoratedFoundText() {
-        _textView.highlightedRanges = []
+        _highlightedRanges = []
+        applyHighlightedRanges();
     }
 
     func replaceAll(queryString: String, options: UITextSearchOptions, withText replacementText: String) {
